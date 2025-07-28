@@ -55,9 +55,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         LiveStream post = LiveStream.fromMap(
                             snapshot.data.docs[index].data());
                         return InkWell(
-                          onTap: () async {
-                            await FirestoreMethods()
-                                .updateViewCount(post.channelId, true);
+                          onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (context) => BroadcastScreen(
@@ -112,9 +110,7 @@ class _FeedScreenState extends State<FeedScreen> {
                               snapshot.data.docs[index].data());
 
                           return InkWell(
-                            onTap: () async {
-                              await FirestoreMethods()
-                                  .updateViewCount(post.channelId, true);
+                            onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (context) => BroadcastScreen(

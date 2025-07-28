@@ -20,7 +20,6 @@ class FirestoreMethods {
                 .doc('${user.user.uid}${user.user.username}')
                 .get())
             .exists)) {
-
           channelId = '${user.user.uid}${user.user.username}';
 
           LiveStream liveStream = LiveStream(
@@ -49,26 +48,51 @@ class FirestoreMethods {
     return channelId;
   }
 
-  Future<void> chat(String text, String id, BuildContext context) async {
-    final user = Provider.of<UserProvider>(context, listen: false);
 
+  Future<void> joinChannel(BuildContext context, String channelId) async {
+    final user = Provider.of<UserProvider>(context, listen: false);
     try {
-      String commentId = const Uuid().v1();
+      await updateViewCount(channelId, true);
       await _firestore
           .collection('livestream')
-          .doc(id)
-          .collection('comments')
-          .doc(commentId)
+          .doc(channelId)
+          .collection('viewers')
+          .doc(user.user.uid)
           .set({
         'username': user.user.username,
-        'message': text,
         'uid': user.user.uid,
-        'createdAt': DateTime.now(),
-        'commentId': commentId,
+        'joinedAt': DateTime.now(),
       });
     } on FirebaseException catch (e) {
       showSnackBar(context, e.message!);
     }
+  }
+
+  Future<void> leaveChannel(BuildContext context, String channelId) async {
+    final user = Provider.of<UserProvider>(context, listen: false);
+    try {
+      await updateViewCount(channelId, false);
+      await _firestore
+          .collection('livestream')
+          .doc(channelId)
+          .collection('viewers')
+          .doc(user.user.uid)
+          .delete();
+    } on FirebaseException catch (e) {
+      showSnackBar(context, e.message!);
+    }
+  }
+
+  Stream<dynamic> getLiveStream(String channelId) {
+    return _firestore.collection('livestream').doc(channelId).snapshots();
+  }
+
+  Stream<dynamic> getViewers(String channelId) {
+    return _firestore
+        .collection('livestream')
+        .doc(channelId)
+        .collection('viewers')
+        .snapshots();
   }
 
   Future<void> updateViewCount(String id, bool isIncrease) async {
@@ -99,6 +123,22 @@ class FirestoreMethods {
             )
             .delete();
       }
+
+      QuerySnapshot viewersSnap = await _firestore
+          .collection('livestream')
+          .doc(channelId)
+          .collection('viewers')
+          .get();
+
+      for (int i = 0; i < viewersSnap.docs.length; i++) {
+        await _firestore
+            .collection('livestream')
+            .doc(channelId)
+            .collection('viewers')
+            .doc(viewersSnap.docs[i].id)
+            .delete();
+      }
+
       await _firestore.collection('livestream').doc(channelId).delete();
     } catch (e) {
       debugPrint(e.toString());

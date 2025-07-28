@@ -9,10 +9,8 @@ import '../config/appId.dart' as config;
 import '../providers/user_provider.dart';
 import '../resources/firestore_methods.dart';
 import '../responsive/resonsive_layout.dart';
-import '../widgets/chat.dart';
 import '../widgets/custom_button.dart';
 import 'home_screen.dart';
-
 
 class BroadcastScreen extends StatefulWidget {
   final bool isBroadcaster;
@@ -32,8 +30,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   List<int> remoteUid = [];
   bool switchCamera = true;
   bool isMuted = false;
-   bool isScreenSharing = false;
-  final ChannelProfileType _channelProfileType = ChannelProfileType.channelProfileLiveBroadcasting;
 
   @override
   void initState() {
@@ -65,7 +61,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   Future<void> getToken() async {
     final res = await http.get(
-      Uri.parse('$baseUrl/rtc/${widget.channelId}/publisher/userAccount/${Provider.of<UserProvider>(context, listen: false).user.uid}/'),
+      Uri.parse(
+          '$baseUrl/rtc/${widget.channelId}/publisher/userAccount/${Provider.of<UserProvider>(context, listen: false).user.uid}/'),
     );
 
     if (res.statusCode == 200) {
@@ -79,36 +76,33 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   }
 
   void _addListeners() {
-    _engine.registerEventHandler(
-     RtcEngineEventHandler(
-    onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-      debugPrint('joinChannelSuccess $connection $elapsed');
-    },
-
-
-   onUserJoined: ( connection, uid, elapsed) {
-      debugPrint('userJoined $uid $elapsed');
-      setState(() {
-        remoteUid.add(uid);
-      });
-    },
-         onUserOffline: (connection, uid, reason) {
-      debugPrint('userOffline $uid $reason');
-      setState(() {
-        remoteUid.removeWhere((element) => element == uid);
-      });
-    },
-
-         onLeaveChannel: (connection,stats) {
-      debugPrint('leaveChannel $stats');
-      setState(() {
-        remoteUid.clear();
-      });
-    },
-         onTokenPrivilegeWillExpire: (connection,token) async {
-      await getToken();
-      await _engine.renewToken(token);
-    }));
+    _engine.registerEventHandler(RtcEngineEventHandler(
+      onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
+        debugPrint('joinChannelSuccess $connection $elapsed');
+      },
+      onUserJoined: (connection, uid, elapsed) {
+        debugPrint('userJoined $uid $elapsed');
+        setState(() {
+          remoteUid.add(uid);
+        });
+      },
+      onUserOffline: (connection, uid, reason) {
+        debugPrint('userOffline $uid $reason');
+        setState(() {
+          remoteUid.removeWhere((element) => element == uid);
+        });
+      },
+      onLeaveChannel: (connection, stats) {
+        debugPrint('leaveChannel $stats');
+        setState(() {
+          remoteUid.clear();
+        });
+      },
+      onTokenPrivilegeWillExpire: (connection, token) async {
+        await getToken();
+        await _engine.renewToken(token);
+      },
+    ));
   }
 
   void _joinChannel() async {
@@ -118,8 +112,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         await [Permission.microphone, Permission.camera].request();
       }
       await _engine.joinChannelWithUserAccount(
-        token: token!, channelId:     widget.channelId, userAccount:  Provider.of<UserProvider>(context, listen: false).user.uid
+        token: token!,
+        channelId: widget.channelId,
+        userAccount: Provider.of<UserProvider>(context, listen: false).user.uid,
       );
+      if (!widget.isBroadcaster) {
+        await FirestoreMethods().joinChannel(context, widget.channelId);
+      }
     }
   }
 
@@ -140,52 +139,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     await _engine.muteLocalAudioStream(isMuted);
   }
 
-  // _startScreenShare() async {
-  //   final helper = await _engine.getScreenShareHelper(
-  //       appGroup: kIsWeb || Platform.isWindows ? null : 'io.agora');
-  //   await helper.disableAudio();
-  //   await helper.enableVideo();
-  //   await helper.setChannelProfile(ChannelProfile.LiveBroadcasting);
-  //   await helper.setClientRole(ClientRole.Broadcaster);
-  //   var windowId = 0;
-  //   var random = Random();
-  //   if (!kIsWeb &&
-  //       (Platform.isWindows || Platform.isMacOS || Platform.isAndroid)) {
-  //     final windows = _engine.enumerateWindows();
-  //     if (windows.isNotEmpty) {
-  //       final index = random.nextInt(windows.length - 1);
-  //       debugPrint('Screensharing window with index $index');
-  //       windowId = windows[index].id;
-  //     }
-  //   }
-  //   await helper.startScreenCaptureByWindowId(windowId);
-  //   setState(() {
-  //     isScreenSharing = true;
-  //   });
-  //   await helper.joinChannelWithUserAccount(
-  //     token,
-  //     widget.channelId,
-  //     Provider.of<UserProvider>(context, listen: false).user.uid,
-  //   );
-  // }
-
-  // _stopScreenShare() async {
-  //   final helper = await _engine.getScreenShareHelper();
-  //   await helper.destroy().then((value) {
-  //     setState(() {
-  //       isScreenSharing = false;
-  //     });
-  //   }).catchError((err) {
-  //     debugPrint('StopScreenShare $err');
-  //   });
-  // }
-
   _leaveChannel() async {
     await _engine.leaveChannel();
-    if ('${Provider.of<UserProvider>(context, listen: false).user.uid}${Provider.of<UserProvider>(context, listen: false).user.username}' == widget.channelId) {
+    if ('${Provider.of<UserProvider>(context, listen: false).user.uid}${Provider.of<UserProvider>(context, listen: false).user.username}' ==
+        widget.channelId) {
       await FirestoreMethods().endLiveStream(widget.channelId);
     } else {
-      await FirestoreMethods().updateViewCount(widget.channelId, false);
+      await FirestoreMethods().leaveChannel(context, widget.channelId);
     }
     Navigator.pushReplacementNamed(context, HomeScreen.routeName);
   }
@@ -231,22 +191,12 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                               onTap: onToggleMute,
                               child: Text(isMuted ? 'Unmute' : 'Mute'),
                             ),
-                            // InkWell(
-                            //   onTap: isScreenSharing
-                            //       ? _stopScreenShare
-                            //       : _startScreenShare,
-                            //   child: Text(
-                            //     isScreenSharing
-                            //         ? 'Stop ScreenSharing'
-                            //         : 'Start Screensharing',
-                            //   ),
-                            // ),
                           ],
                         ),
                     ],
                   ),
                 ),
-                Chat(channelId: widget.channelId),
+                if (widget.isBroadcaster) _viewerList(),
               ],
             ),
             mobileBody: Column(
@@ -267,11 +217,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                       ),
                     ],
                   ),
-                Expanded(
-                  child: Chat(
-                    channelId: widget.channelId,
-                  ),
-                ),
+                if (widget.isBroadcaster) _viewerList(),
               ],
             ),
           ),
@@ -285,21 +231,44 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       aspectRatio: 16 / 9,
       child: "${user.uid}${user.username}" == widget.channelId
           ? AgoraVideoView(
-        controller: VideoViewController(
-          rtcEngine: _engine,
-          canvas: const VideoCanvas(uid: 0), // local user
-        ),
-      )
+              controller: VideoViewController(
+                rtcEngine: _engine,
+                canvas: const VideoCanvas(uid: 0), // local user
+              ),
+            )
           : remoteUid.isNotEmpty
-          ? AgoraVideoView(
-        controller: VideoViewController.remote(
-          rtcEngine: _engine,
-          canvas: VideoCanvas(uid: remoteUid[0]),
-          connection: RtcConnection(channelId: widget.channelId),
-        ),
-      )
-          : Container(),
+              ? AgoraVideoView(
+                  controller: VideoViewController.remote(
+                    rtcEngine: _engine,
+                    canvas: VideoCanvas(uid: remoteUid[0]),
+                    connection: RtcConnection(channelId: widget.channelId),
+                  ),
+                )
+              : Container(),
     );
   }
 
+  Widget _viewerList() {
+    return StreamBuilder<dynamic>(
+      stream: FirestoreMethods().getViewers(widget.channelId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            !snapshot.hasData) {
+          return const CircularProgressIndicator();
+        }
+
+        final viewers = snapshot.data.docs;
+
+        return ListView.builder(
+          itemCount: viewers.length,
+          itemBuilder: (context, index) {
+            final viewer = viewers[index];
+            return ListTile(
+              title: Text(viewer['username']),
+            );
+          },
+        );
+      },
+    );
+  }
 }
