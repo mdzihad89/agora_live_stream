@@ -47,7 +47,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         _listenForAccessRequestStatus();
       }
       setState(() {
-        _isLoading = false; // Set loading to false after initialization attempts
+        _isLoading = false;
       });
     });
   }
@@ -254,7 +254,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: _isLoading || _engine == null
+            child: _isLoading
                 ? const Center(
               child: CircularProgressIndicator(),
             )
@@ -324,17 +324,17 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       )
           : _hasAccess && remoteUid.isNotEmpty
           ? Builder(
-              builder: (context) {
-                debugPrint('Attempting to render remote video. _hasAccess: $_hasAccess, remoteUid.isNotEmpty: ${remoteUid.isNotEmpty}, remoteUid: $remoteUid');
-                return AgoraVideoView(
-                  controller: VideoViewController.remote(
-                    rtcEngine: _engine!,
-                    canvas: VideoCanvas(uid: remoteUid[0]),
-                    connection: RtcConnection(channelId: widget.channelId),
-                  ),
-                );
-              }
-            )
+          builder: (context) {
+            debugPrint('Attempting to render remote video. _hasAccess: $_hasAccess, remoteUid.isNotEmpty: ${remoteUid.isNotEmpty}, remoteUid: $remoteUid');
+            return AgoraVideoView(
+              controller: VideoViewController.remote(
+                rtcEngine: _engine!,
+                canvas: VideoCanvas(uid: remoteUid[0]),
+                connection: RtcConnection(channelId: widget.channelId),
+              ),
+            );
+          }
+      )
           : Container(),
     );
   }

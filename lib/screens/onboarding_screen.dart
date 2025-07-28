@@ -18,10 +18,10 @@ class OnboardingScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Text(
-                'Welcome to \n Twitch',
+                'Agora Live Stream Demo',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 40,
+                  fontSize: 30,
                 ),
                 textAlign: TextAlign.center,
               ),
