@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "186129183743",
+    "project_id": "agora-live-streaming-10",
+    "storage_bucket": "agora-live-streaming-10.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:186129183743:android:fc436b48939c5da6df6dca",
+        "android_client_info": {
+          "package_name": "com.example.agora_live_stream"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCqz-s9Ju_Zm_B9bCTyIqjhDEsAwliZmU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
