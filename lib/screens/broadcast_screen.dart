@@ -28,36 +28,34 @@ class BroadcastScreen extends StatefulWidget {
 }
 
 class _BroadcastScreenState extends State<BroadcastScreen> {
-  late final RtcEngine _engine;
+  RtcEngine? _engine; // Made nullable
   List<int> remoteUid = [];
   bool switchCamera = true;
   bool isMuted = false;
   bool _isRequestPending = false;
   bool _hasAccess = false;
+  bool _isLoading = true; // Added loading state
 
   @override
   void initState() {
-
     super.initState();
-
-
-    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) async {
       if (widget.isBroadcaster) {
-        _initializeBroadcaster();
+        await _initializeBroadcaster();
       }
       if (!widget.isBroadcaster) {
         _listenForAccessRequestStatus();
       }
-    },);
-
-
+      setState(() {
+        _isLoading = false; // Set loading to false after initialization attempts
+      });
+    });
   }
 
   Future<void> _initializeBroadcaster() async {
     debugPrint('Initializing Broadcaster...');
     await _initEngine();
-    await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
+    await _engine?.setClientRole(role: ClientRoleType.clientRoleBroadcaster); // Null-aware
     debugPrint('Broadcaster role set. Joining channel...');
     await _joinChannel();
     debugPrint('Broadcaster joined channel.');
@@ -65,20 +63,19 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   @override
   void dispose() {
-    _engine.leaveChannel();
-    _engine.release();
+    _engine?.leaveChannel(); // Null-aware
+    _engine?.release(); // Null-aware
     super.dispose();
   }
 
-
-  Future _initEngine() async {
+  Future<void> _initEngine() async {
     _engine = createAgoraRtcEngine();
-    await _engine.initialize(RtcEngineContext(
+    await _engine!.initialize(RtcEngineContext( // Use ! for non-null assertion after assignment
       appId: config.appId,
     ));
     _addListeners();
-    await _engine.enableVideo();
-    await _engine.startPreview();
+    await _engine!.enableVideo(); // Use !
+    await _engine!.startPreview(); // Use !
   }
 
   String baseUrl = "https://token-server-hrve.onrender.com";
@@ -105,7 +102,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   }
 
   void _addListeners() {
-    _engine.registerEventHandler(RtcEngineEventHandler(
+    _engine!.registerEventHandler(RtcEngineEventHandler(
       onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
         debugPrint('joinChannelSuccess $connection $elapsed');
       },
@@ -129,7 +126,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       },
       onTokenPrivilegeWillExpire: (connection, token) async {
         await getToken();
-        await _engine.renewToken(token);
+        await _engine!.renewToken(token);
       },
     ));
   }
@@ -140,7 +137,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       if (defaultTargetPlatform == TargetPlatform.android) {
         await [Permission.microphone, Permission.camera].request();
       }
-      await _engine.joinChannelWithUserAccount(
+      await _engine!.joinChannelWithUserAccount(
         token: token!,
         channelId: widget.channelId,
         userAccount: Provider
@@ -182,7 +179,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             _isRequestPending = false;
           });
           await _initEngine(); // Initialize Agora
-          await _engine.setClientRole(role: ClientRoleType.clientRoleAudience);
+          await _engine!.setClientRole(role: ClientRoleType.clientRoleAudience);
           await _joinChannel(); // Join channel after engine is initialized
           Future.delayed(const Duration(seconds: 5), () {
             debugPrint('Delayed check: remoteUid after 5 seconds: $remoteUid');
@@ -200,7 +197,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   }
 
   void _switchCamera() {
-    _engine.switchCamera().then((value) {
+    _engine!.switchCamera().then((value) {
       setState(() {
         switchCamera = !switchCamera;
       });
@@ -213,11 +210,11 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     setState(() {
       isMuted = !isMuted;
     });
-    await _engine.muteLocalAudioStream(isMuted);
+    await _engine!.muteLocalAudioStream(isMuted);
   }
 
   _leaveChannel() async {
-    await _engine.leaveChannel();
+    await _engine!.leaveChannel();
     if ('${Provider
         .of<UserProvider>(context, listen: false)
         .user
@@ -257,64 +254,71 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: ResponsiveLatout(
-            desktopBody: Row(
-              children: [
-               // keep it empty i don't need for desktop
-              ],
-            ),
-            mobileBody: Column(
-              children: [
-                if (widget.isBroadcaster || _hasAccess)
-                  _renderVideo(user)
-                else
-                  if (_isRequestPending)
-                    const Center(
-                      child: Text('Requesting access...'),
-                    )
+            child: _isLoading || _engine == null
+                ? const Center(
+              child: CircularProgressIndicator(),
+            )
+                : ResponsiveLatout(
+              desktopBody: Row(
+                children: [
+                  // keep it empty i don't need for desktop
+                ],
+              ),
+              mobileBody: Column(
+                children: [
+                  if (widget.isBroadcaster || _hasAccess)
+                    _renderVideo(user)
                   else
+                    if (_isRequestPending)
+                      const Center(
+                        child: Text('Requesting access...'),
+                      )
+                    else
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('You need permission to watch this stream.'),
+                          CustomButton(
+                            text: 'Request to Watch',
+                            onTap: _sendAccessRequest,
+                          ),
+                        ],
+                      ),
+                  if (widget.isBroadcaster)
                     Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text('You need permission to watch this stream.'),
-                        CustomButton(
-                          text: 'Request to Watch',
-                          onTap: _sendAccessRequest,
+                        InkWell(
+                          onTap: _switchCamera,
+                          child: const Text('Switch Camera'),
+                        ),
+                        InkWell(
+                          onTap: onToggleMute,
+                          child: Text(isMuted ? 'Unmute' : 'Mute'),
                         ),
                       ],
                     ),
-                if (widget.isBroadcaster)
-                  Column(
-                    children: [
-                      InkWell(
-                        onTap: _switchCamera,
-                        child: const Text('Switch Camera'),
-                      ),
-                      InkWell(
-                        onTap: onToggleMute,
-                        child: Text(isMuted ? 'Unmute' : 'Mute'),
-                      ),
-                    ],
-                  ),
-                if (widget.isBroadcaster) _viewerList(),
-                if (widget.isBroadcaster) _accessRequestList(),
-              ],
+                  if (widget.isBroadcaster) _viewerList(),
+                  if (widget.isBroadcaster) _accessRequestList(),
+                ],
+              ),
             ),
           ),
         ),
       ),
-    )
     );
   }
 
   _renderVideo(user) {
     debugPrint('Inside _renderVideo. isBroadcaster: ${widget.isBroadcaster}, _hasAccess: $_hasAccess, remoteUid: $remoteUid');
+    if (_engine == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: widget.isBroadcaster
           ? AgoraVideoView(
         controller: VideoViewController(
-          rtcEngine: _engine,
+          rtcEngine: _engine!,
           canvas: const VideoCanvas(uid: 0), // local user
         ),
       )
@@ -324,7 +328,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                 debugPrint('Attempting to render remote video. _hasAccess: $_hasAccess, remoteUid.isNotEmpty: ${remoteUid.isNotEmpty}, remoteUid: $remoteUid');
                 return AgoraVideoView(
                   controller: VideoViewController.remote(
-                    rtcEngine: _engine,
+                    rtcEngine: _engine!,
                     canvas: VideoCanvas(uid: remoteUid[0]),
                     connection: RtcConnection(channelId: widget.channelId),
                   ),

@@ -19,7 +19,11 @@ class CustomButton extends StatelessWidget {
         minimumSize: const Size(double.infinity, 40),
       ),
       onPressed: onTap,
-      child: Text(text),
+      child: Text(text , style: const TextStyle(
+        color: Colors.white,
+        fontSize: 16,
+        fontWeight: FontWeight.bold,
+      )),
     );
   }
 }

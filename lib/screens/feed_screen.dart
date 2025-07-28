@@ -121,7 +121,6 @@ class _FeedScreenState extends State<FeedScreen> {
                               );
                             },
                             child: Container(
-                              height: size.height * 0.1,
                               margin: const EdgeInsets.symmetric(vertical: 10),
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
