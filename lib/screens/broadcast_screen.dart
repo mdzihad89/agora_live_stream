@@ -37,19 +37,30 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   @override
   void initState() {
+
     super.initState();
-    if (widget.isBroadcaster) {
-      _initializeBroadcaster();
-    }
-    if (!widget.isBroadcaster) {
-      _listenForAccessRequestStatus();
-    }
+
+
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+
+      if (widget.isBroadcaster) {
+        _initializeBroadcaster();
+      }
+      if (!widget.isBroadcaster) {
+        _listenForAccessRequestStatus();
+      }
+    },);
+
+
   }
 
   Future<void> _initializeBroadcaster() async {
-    _initEngine();
+    debugPrint('Initializing Broadcaster...');
+    await _initEngine();
     await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
-    _joinChannel();
+    debugPrint('Broadcaster role set. Joining channel...');
+    await _joinChannel();
+    debugPrint('Broadcaster joined channel.');
   }
 
   @override
@@ -60,7 +71,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   }
 
 
-  void _initEngine() async {
+  Future _initEngine() async {
     _engine = createAgoraRtcEngine();
     await _engine.initialize(RtcEngineContext(
       appId: config.appId,
@@ -123,7 +134,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     ));
   }
 
-  void _joinChannel() async {
+  Future _joinChannel() async {
     await getToken();
     if (token != null) {
       if (defaultTargetPlatform == TargetPlatform.android) {
@@ -170,9 +181,12 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             _hasAccess = true;
             _isRequestPending = false;
           });
-          _initEngine(); // Initialize Agora
+          await _initEngine(); // Initialize Agora
           await _engine.setClientRole(role: ClientRoleType.clientRoleAudience);
-          _joinChannel(); // Join channel after engine is initialized
+          await _joinChannel(); // Join channel after engine is initialized
+          Future.delayed(const Duration(seconds: 5), () {
+            debugPrint('Delayed check: remoteUid after 5 seconds: $remoteUid');
+          });
           showSnackBar(
               context, 'Access granted! You can now watch the stream.');
         } else if (status == 'denied' && _isRequestPending) {
@@ -246,48 +260,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             child: ResponsiveLatout(
             desktopBody: Row(
               children: [
-                Expanded(
-                  child: Column(
-                    children: [
-                      if (widget.isBroadcaster || _hasAccess)
-                        _renderVideo(user)
-                      else
-                        if (_isRequestPending)
-                          const Center(
-                            child: Text('Requesting access...'),
-                          )
-                        else
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text(
-                                  'You need permission to watch this stream.'),
-                              CustomButton(
-                                text: 'Request to Watch',
-                                onTap: _sendAccessRequest,
-                              ),
-                            ],
-                          ),
-                      if (widget.isBroadcaster)
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: [
-                            InkWell(
-                              onTap: _switchCamera,
-                              child: const Text('Switch Camera'),
-                            ),
-                            InkWell(
-                              onTap: onToggleMute,
-                              child: Text(isMuted ? 'Unmute' : 'Mute'),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-                if (widget.isBroadcaster) _viewerList(),
-                if (widget.isBroadcaster) _accessRequestList(),
+               // keep it empty i don't need for desktop
               ],
             ),
             mobileBody: Column(
@@ -335,6 +308,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   }
 
   _renderVideo(user) {
+    debugPrint('Inside _renderVideo. isBroadcaster: ${widget.isBroadcaster}, _hasAccess: $_hasAccess, remoteUid: $remoteUid');
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: widget.isBroadcaster
@@ -345,13 +319,18 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         ),
       )
           : _hasAccess && remoteUid.isNotEmpty
-          ? AgoraVideoView(
-        controller: VideoViewController.remote(
-          rtcEngine: _engine,
-          canvas: VideoCanvas(uid: remoteUid[0]),
-          connection: RtcConnection(channelId: widget.channelId),
-        ),
-      )
+          ? Builder(
+              builder: (context) {
+                debugPrint('Attempting to render remote video. _hasAccess: $_hasAccess, remoteUid.isNotEmpty: ${remoteUid.isNotEmpty}, remoteUid: $remoteUid');
+                return AgoraVideoView(
+                  controller: VideoViewController.remote(
+                    rtcEngine: _engine,
+                    canvas: VideoCanvas(uid: remoteUid[0]),
+                    connection: RtcConnection(channelId: widget.channelId),
+                  ),
+                );
+              }
+            )
           : Container(),
     );
   }
