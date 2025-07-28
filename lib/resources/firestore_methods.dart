@@ -139,9 +139,78 @@ class FirestoreMethods {
             .delete();
       }
 
+      // Delete access requests when stream ends
+      QuerySnapshot accessRequestsSnap = await _firestore
+          .collection('livestream')
+          .doc(channelId)
+          .collection('accessRequests')
+          .get();
+
+      for (int i = 0; i < accessRequestsSnap.docs.length; i++) {
+        await _firestore
+            .collection('livestream')
+            .doc(channelId)
+            .collection('accessRequests')
+            .doc(accessRequestsSnap.docs[i].id)
+            .delete();
+      }
+
       await _firestore.collection('livestream').doc(channelId).delete();
     } catch (e) {
       debugPrint(e.toString());
     }
+  }
+
+  Future<void> sendAccessRequest(
+      BuildContext context, String channelId, String requesterUid, String requesterUsername) async {
+    try {
+      await _firestore
+          .collection('livestream')
+          .doc(channelId)
+          .collection('accessRequests')
+          .doc(requesterUid)
+          .set({
+        'uid': requesterUid,
+        'username': requesterUsername,
+        'status': 'pending',
+        'timestamp': DateTime.now(),
+      });
+    } on FirebaseException catch (e) {
+      showSnackBar(context, e.message!);
+    }
+  }
+
+  Future<void> updateAccessRequestStatus(
+      String channelId, String requesterUid, String status) async {
+    try {
+      await _firestore
+          .collection('livestream')
+          .doc(channelId)
+          .collection('accessRequests')
+          .doc(requesterUid)
+          .update({
+        'status': status,
+      });
+    } catch (e) {
+      debugPrint(e.toString());
+    }
+  }
+
+  Stream<QuerySnapshot> streamAccessRequests(String channelId) {
+    return _firestore
+        .collection('livestream')
+        .doc(channelId)
+        .collection('accessRequests')
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
+  }
+
+  Stream<DocumentSnapshot> streamMyAccessRequest(String channelId, String requesterUid) {
+    return _firestore
+        .collection('livestream')
+        .doc(channelId)
+        .collection('accessRequests')
+        .doc(requesterUid)
+        .snapshots();
   }
 }

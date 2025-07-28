@@ -1,56 +1,86 @@
-# Implementation Plan for Missing Features
+# Implementation Plan: Audience Stream Access Request Feature
 
-This document outlines the steps to implement the missing features in the Agora Live Stream application, based on the PRD.
+## Goal
+Implement a system where audience members must request and receive permission from the broadcaster to view a live stream. Audience members will always remain in the `ClientRoleType.clientRoleAudience` role.
 
-## 1. Real-Time Viewer Count
+## Current Architecture Overview
+The application is a Flutter project utilizing Firebase (Firestore, Authentication) for backend services and Agora RTC Engine for live video streaming. Key components include:
+- **Authentication:** Handled by `AuthMethods` and Firebase Authentication.
+- **Livestream Management:** `FirestoreMethods` interacts with Firestore to manage livestream data (starting, ending, joining, leaving).
+- **UI:** Screens for onboarding, login, signup, home, feed, go-live, and broadcast.
+- **State Management:** `UserProvider` manages user data.
+- **Agora Integration:** `BroadcastScreen` uses `agora_rtc_engine` for video/audio.
 
-### Objective
+## Affected Files & Components
 
-Ensure the viewer count for each live stream updates in real-time as users join and leave.
+1.  `lib/screens/broadcast_screen.dart`: Major modifications for both broadcaster and audience UI and logic.
+2.  `lib/resources/firestore_methods.dart`: New methods for handling access requests (sending, updating status, streaming).
+3.  `lib/models/livestream.dart`: Potentially a new data structure or subcollection for access requests.
+4.  `lib/utils/utils.dart`: For displaying `SnackBar` messages.
 
-### Steps
+## Proposed Changes
 
-1.  **Update Firestore Methods:**
-    *   In `lib/resources/firestore_methods.dart`, create a new function `updateViewers` that:
-        *   Takes `channelId` and `uid` as arguments.
-        *   Adds a document to the `viewers` subcollection for the specified `channelId`.
-        *   Removes the document when the user leaves the stream.
-    *   Modify the `updateViewCount` function to increment or decrement the `viewers` field in the `liveStreams` collection.
+### 1. Firestore Schema Update
 
-2.  **Integrate with Broadcast Screen:**
-    *   In `lib/screens/broadcast_screen.dart`, call the `updateViewers` function when a user joins or leaves the stream.
-    *   Use a `StreamBuilder` to listen for changes in the `viewers` subcollection and update the UI in real-time.
+*   **New Subcollection:** Under each existing `livestream` document in the `livestream` collection, create a new subcollection named `accessRequests`.
+*   **Access Request Document Structure:** Each document within `accessRequests` will represent a single request and contain the following fields:
+    *   `uid` (String): The unique ID of the requesting user.
+    *   `username` (String): The username of the requesting user.
+    *   `status` (String): Current status of the request (`pending`, `accepted`, `denied`).
+    *   `timestamp` (Timestamp): Server timestamp when the request was made.
 
-## 2. Viewer List for Broadcaster
+### 2. `lib/resources/firestore_methods.dart` Modifications
 
-### Objective
+*   **`sendAccessRequest(BuildContext context, String channelId, String requesterUid, String requesterUsername)`:**
+    *   **Purpose:** To send a new access request from an audience member to the broadcaster.
+    *   **Action:** Adds a new document to the `livestream/{channelId}/accessRequests` subcollection with `status: 'pending'`.
+*   **`updateAccessRequestStatus(String channelId, String requesterUid, String status)`:**
+    *   **Purpose:** To update the status of a specific access request (e.g., from `pending` to `accepted` or `denied`).
+    *   **Action:** Updates the `status` field of the corresponding document in `livestream/{channelId}/accessRequests`.
+*   **`streamAccessRequests(String channelId)`:**
+    *   **Purpose:** To provide a real-time stream of pending access requests for a given channel.
+    *   **Action:** Returns a `Stream<QuerySnapshot>` from the `livestream/{channelId}/accessRequests` subcollection, filtered by `status: 'pending'`.
+*   **`streamMyAccessRequest(String channelId, String requesterUid)`:**
+    *   **Purpose:** To provide a real-time stream of the status of a specific user's access request.
+    *   **Action:** Returns a `Stream<DocumentSnapshot>` for the specific document in `livestream/{channelId}/accessRequests/{requesterUid}`.
 
-Display a real-time list of viewers to the broadcaster during a live stream.
+### 3. `lib/screens/broadcast_screen.dart` (Audience Side)
 
-### Steps
+*   **Initial State:** When an audience member navigates to `BroadcastScreen`, they should *not* automatically join the Agora channel. Instead, they should see a UI indicating they need to request access.
+*   **UI:**
+    *   Add a `CustomButton` (e.g., "Request to Watch") to the audience view. This button should only be visible if `isBroadcaster` is `false` and no request has been sent or is pending.
+    *   Display a `LoadingIndicator` or a message like "Requesting access..." when a request is pending.
+    *   If access is denied, display a message like "Access Denied" and potentially re-enable the "Request to Watch" button.
+*   **Logic (`_BroadcastScreenState`):**
+    *   **`_sendAccessRequest()` method:**
+        *   Call `FirestoreMethods().sendAccessRequest()` with the current user's details.
+        *   Set a local state variable (e.g., `_isRequestPending = true`).
+        *   Start listening to the specific access request document in Firestore using `FirestoreMethods().streamMyAccessRequest()`.
+    *   **Handling Response:**
+        *   If the request `status` changes to `accepted` (from the `streamMyAccessRequest` listener):
+            *   Call `_engine.setClientRole(role: ClientRoleType.clientRoleAudience)` (if not already set).
+            *   Call `_joinChannel()` to start receiving the stream.
+            *   Hide the "Request to Watch" button and display the stream.
+            *   Display a success `SnackBar` using `showSnackBar`.
+        *   If the request `status` changes to `denied` (from the `streamMyAccessRequest` listener):
+            *   Display a "Request Denied" `SnackBar`.
+            *   Reset `_isRequestPending = false` and re-enable the "Request to Watch" button.
+    *   **Error Handling:** Implement `try-catch` for Firestore operations and show error `SnackBar` messages.
 
-1.  **Create a Viewer List Widget:**
-    *   Create a new widget in `lib/widgets/viewer_list.dart`.
-    *   This widget will use a `StreamBuilder` to listen for changes in the `viewers` subcollection.
-    *   Display the list of viewers using a `ListView.builder`.
+### 4. `lib/screens/broadcast_screen.dart` (Broadcaster Side)
 
-2.  **Integrate with Broadcast Screen:**
-    *   In `lib/screens/broadcast_screen.dart`, add the `ViewerList` widget below the video player.
-    *   Use a conditional statement to ensure the list is only visible to the broadcaster.
+*   **UI:**
+    *   Implement a `StreamBuilder` that listens to `FirestoreMethods().streamAccessRequests(widget.channelId)`.
+    *   When new `pending` requests are received:
+        *   Display a clear notification to the broadcaster (e.g., a small overlay, a dedicated section in the UI, or a dialog).
+        *   The notification should show the `username` of the requester.
+        *   Provide two `CustomButton`s: "Allow" and "Deny".
+*   **Logic (`_BroadcastScreenState`):**
+    *   **`_handleAccessRequest(String requesterUid, String status)` method:**
+        *   When "Allow" is tapped: Call `FirestoreMethods().updateAccessRequestStatus(widget.channelId, requesterUid, 'accepted')`.
+        *   When "Deny" is tapped: Call `FirestoreMethods().updateAccessRequestStatus(widget.channelId, requesterUid, 'denied')`.
+        *   Dismiss the notification/dialog after action.
+    *   **Managing Multiple Requests:** Initially, focus on handling one request at a time. Consider a queue or a list for multiple pending requests in future iterations if needed.
 
-## 3. Testing and Validation
-
-### Objective
-
-Ensure the new features are working correctly and are free of bugs.
-
-### Steps
-
-1.  **Manual Testing:**
-    *   Start a live stream and have multiple users join and leave.
-    *   Verify that the viewer count updates correctly in real-time.
-    *   Confirm that the broadcaster can see the list of viewers and that it updates as expected.
-
-2.  **Automated Testing (Optional):**
-    *   Write unit tests for the `firestore_methods.dart` functions.
-    *   Write widget tests for the `ViewerList` widget.
+### 5. Agora Role
+*   Audience members will always remain in the `ClientRoleType.clientRoleAudience` role. The `_engine.setClientRole` method will be used to set this role *only after* their access request has been accepted by the broadcaster.

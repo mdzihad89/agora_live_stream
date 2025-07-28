@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -9,6 +10,7 @@ import '../config/appId.dart' as config;
 import '../providers/user_provider.dart';
 import '../resources/firestore_methods.dart';
 import '../responsive/resonsive_layout.dart';
+import '../utils/utils.dart';
 import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 
@@ -30,12 +32,33 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   List<int> remoteUid = [];
   bool switchCamera = true;
   bool isMuted = false;
+  bool _isRequestPending = false;
+  bool _hasAccess = false;
 
   @override
   void initState() {
     super.initState();
-    _initEngine();
+    if (widget.isBroadcaster) {
+      _initializeBroadcaster();
+    }
+    if (!widget.isBroadcaster) {
+      _listenForAccessRequestStatus();
+    }
   }
+
+  Future<void> _initializeBroadcaster() async {
+    _initEngine();
+    await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
+    _joinChannel();
+  }
+
+  @override
+  void dispose() {
+    _engine.leaveChannel();
+    _engine.release();
+    super.dispose();
+  }
+
 
   void _initEngine() async {
     _engine = createAgoraRtcEngine();
@@ -45,14 +68,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     _addListeners();
     await _engine.enableVideo();
     await _engine.startPreview();
-
-    if (widget.isBroadcaster) {
-      await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
-    } else {
-      await _engine.setClientRole(role: ClientRoleType.clientRoleAudience);
-    }
-
-    _joinChannel();
   }
 
   String baseUrl = "https://token-server-hrve.onrender.com";
@@ -62,7 +77,10 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   Future<void> getToken() async {
     final res = await http.get(
       Uri.parse(
-          '$baseUrl/rtc/${widget.channelId}/publisher/userAccount/${Provider.of<UserProvider>(context, listen: false).user.uid}/'),
+          '$baseUrl/rtc/${widget.channelId}/publisher/userAccount/${Provider
+              .of<UserProvider>(context, listen: false)
+              .user
+              .uid}/'),
     );
 
     if (res.statusCode == 200) {
@@ -114,12 +132,57 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       await _engine.joinChannelWithUserAccount(
         token: token!,
         channelId: widget.channelId,
-        userAccount: Provider.of<UserProvider>(context, listen: false).user.uid,
+        userAccount: Provider
+            .of<UserProvider>(context, listen: false)
+            .user
+            .uid,
       );
       if (!widget.isBroadcaster) {
         await FirestoreMethods().joinChannel(context, widget.channelId);
       }
     }
+  }
+
+
+  void _sendAccessRequest() async {
+    final user = Provider
+        .of<UserProvider>(context, listen: false)
+        .user;
+    setState(() {
+      _isRequestPending = true;
+    });
+    await FirestoreMethods().sendAccessRequest(
+        context, widget.channelId, user.uid, user.username);
+  }
+
+  void _listenForAccessRequestStatus() {
+    final user = Provider
+        .of<UserProvider>(context, listen: false)
+        .user;
+    FirestoreMethods()
+        .streamMyAccessRequest(widget.channelId, user.uid)
+        .listen((snapshot) async {
+      if (snapshot.exists) {
+        final Map<String, dynamic>? data = snapshot.data() as Map<String, dynamic>?;
+        final status = data?['status'] ?? '';
+        if (status == 'accepted' && !_hasAccess) {
+          setState(() {
+            _hasAccess = true;
+            _isRequestPending = false;
+          });
+          _initEngine(); // Initialize Agora
+          await _engine.setClientRole(role: ClientRoleType.clientRoleAudience);
+          _joinChannel(); // Join channel after engine is initialized
+          showSnackBar(
+              context, 'Access granted! You can now watch the stream.');
+        } else if (status == 'denied' && _isRequestPending) {
+          setState(() {
+            _isRequestPending = false;
+          });
+          showSnackBar(context, 'Your request to watch the stream was denied.');
+        }
+      }
+    });
   }
 
   void _switchCamera() {
@@ -141,7 +204,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   _leaveChannel() async {
     await _engine.leaveChannel();
-    if ('${Provider.of<UserProvider>(context, listen: false).user.uid}${Provider.of<UserProvider>(context, listen: false).user.username}' ==
+    if ('${Provider
+        .of<UserProvider>(context, listen: false)
+        .user
+        .uid}${Provider
+        .of<UserProvider>(context, listen: false)
+        .user
+        .username}' ==
         widget.channelId) {
       await FirestoreMethods().endLiveStream(widget.channelId);
     } else {
@@ -152,7 +221,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = Provider.of<UserProvider>(context).user;
+    final user = Provider
+        .of<UserProvider>(context)
+        .user;
 
     return WillPopScope(
       onWillPop: () async {
@@ -162,23 +233,42 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       child: Scaffold(
         bottomNavigationBar: widget.isBroadcaster
             ? Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18.0),
-                child: CustomButton(
-                  text: 'End Stream',
-                  onTap: _leaveChannel,
-                ),
-              )
+          padding: const EdgeInsets.symmetric(horizontal: 18.0),
+          child: CustomButton(
+            text: 'End Stream',
+            onTap: _leaveChannel,
+          ),
+        )
             : null,
-        body: Padding(
-          padding: const EdgeInsets.all(8),
-          child: ResponsiveLatout(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: ResponsiveLatout(
             desktopBody: Row(
               children: [
                 Expanded(
                   child: Column(
                     children: [
-                      _renderVideo(user),
-                      if ("${user.uid}${user.username}" == widget.channelId)
+                      if (widget.isBroadcaster || _hasAccess)
+                        _renderVideo(user)
+                      else
+                        if (_isRequestPending)
+                          const Center(
+                            child: Text('Requesting access...'),
+                          )
+                        else
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text(
+                                  'You need permission to watch this stream.'),
+                              CustomButton(
+                                text: 'Request to Watch',
+                                onTap: _sendAccessRequest,
+                              ),
+                            ],
+                          ),
+                      if (widget.isBroadcaster)
                         Column(
                           mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.start,
@@ -197,15 +287,31 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   ),
                 ),
                 if (widget.isBroadcaster) _viewerList(),
+                if (widget.isBroadcaster) _accessRequestList(),
               ],
             ),
             mobileBody: Column(
               children: [
-                _renderVideo(user),
-                if ("${user.uid}${user.username}" == widget.channelId)
+                if (widget.isBroadcaster || _hasAccess)
+                  _renderVideo(user)
+                else
+                  if (_isRequestPending)
+                    const Center(
+                      child: Text('Requesting access...'),
+                    )
+                  else
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('You need permission to watch this stream.'),
+                        CustomButton(
+                          text: 'Request to Watch',
+                          onTap: _sendAccessRequest,
+                        ),
+                      ],
+                    ),
+                if (widget.isBroadcaster)
                   Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       InkWell(
                         onTap: _switchCamera,
@@ -218,33 +324,35 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                     ],
                   ),
                 if (widget.isBroadcaster) _viewerList(),
+                if (widget.isBroadcaster) _accessRequestList(),
               ],
             ),
           ),
         ),
       ),
+    )
     );
   }
 
   _renderVideo(user) {
     return AspectRatio(
       aspectRatio: 16 / 9,
-      child: "${user.uid}${user.username}" == widget.channelId
+      child: widget.isBroadcaster
           ? AgoraVideoView(
-              controller: VideoViewController(
-                rtcEngine: _engine,
-                canvas: const VideoCanvas(uid: 0), // local user
-              ),
-            )
-          : remoteUid.isNotEmpty
-              ? AgoraVideoView(
-                  controller: VideoViewController.remote(
-                    rtcEngine: _engine,
-                    canvas: VideoCanvas(uid: remoteUid[0]),
-                    connection: RtcConnection(channelId: widget.channelId),
-                  ),
-                )
-              : Container(),
+        controller: VideoViewController(
+          rtcEngine: _engine,
+          canvas: const VideoCanvas(uid: 0), // local user
+        ),
+      )
+          : _hasAccess && remoteUid.isNotEmpty
+          ? AgoraVideoView(
+        controller: VideoViewController.remote(
+          rtcEngine: _engine,
+          canvas: VideoCanvas(uid: remoteUid[0]),
+          connection: RtcConnection(channelId: widget.channelId),
+        ),
+      )
+          : Container(),
     );
   }
 
@@ -259,14 +367,77 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
         final viewers = snapshot.data.docs;
 
-        return ListView.builder(
-          itemCount: viewers.length,
-          itemBuilder: (context, index) {
-            final viewer = viewers[index];
-            return ListTile(
-              title: Text(viewer['username']),
-            );
-          },
+        return Expanded(
+          child: ListView.builder(
+            itemCount: viewers.length,
+            itemBuilder: (context, index) {
+              final viewer = viewers[index];
+              return ListTile(
+                title: Text("${viewer['username']} is watching ",
+                    style: TextStyle(color: Colors.black)),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _accessRequestList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirestoreMethods().streamAccessRequests(widget.channelId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            !snapshot.hasData) {
+          return const SizedBox.shrink(); // Don't show anything if no requests
+        }
+
+        final requests = snapshot.data!.docs;
+
+        if (requests.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Expanded(
+          child: Column(
+            children: [
+              const Text(
+                'Pending Access Requests',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: requests.length,
+                  itemBuilder: (context, index) {
+                    final request = requests[index];
+                    return ListTile(
+                      title: Text(request['username']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.check, color: Colors.green),
+                            onPressed: () =>
+                                FirestoreMethods()
+                                    .updateAccessRequestStatus(
+                                    widget.channelId, request['uid'],
+                                    'accepted'),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () =>
+                                FirestoreMethods()
+                                    .updateAccessRequestStatus(
+                                    widget.channelId, request['uid'], 'denied'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
